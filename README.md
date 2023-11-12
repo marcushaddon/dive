@@ -1,4 +1,5 @@
-# Whammy
+# Dive
+A plugin for pitch bending audio.
 
 ## Building
 
