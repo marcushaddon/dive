@@ -9,8 +9,8 @@ struct Whammy {
 	params: Arc<WhammyParams>,
 	buffer: Vec<f32>,
 	write_pos: usize,
-	read_pos: usize,     // To be a float
-	signal_delta: usize, // To be a float
+  envelope: Vec<f32>,
+  envelope_pos: usize,
 }
 
 #[derive(Params)]
@@ -19,26 +19,38 @@ struct WhammyParams {
 	/// these IDs remain constant, you can rename and reorder these fields as you wish. The
 	/// parameters are exposed to the host in the same order they were defined. In this case, this
 	/// gain parameter is stored as linear gain while the values are displayed in decibels.
-	#[id = "gain"]
-	pub gain: FloatParam,
+	#[id = "dive"]
+	pub dive: FloatParam,
 }
 
 impl Default for Whammy {
 	fn default() -> Self {
 		let mut buffer: Vec<f32> = Vec::new();
+    // Zero out ring buffer
 		for _ in 0..(44100 * 3) {
 			buffer.push(0.);
 		}
 
-    let signal_delta: usize = 22050;
-    let read_pos = &buffer.len() - signal_delta;
+    let mut envelope: Vec<f32> = Vec::new();
+    let inc: f32 = 1. / 22050.;
+
+    // Manually create envelop
+    let mut level: f32 = 0.;
+    for i in 0..22050 {
+      envelope.push(level);
+      level += inc;
+    }
+    for i in 0..22050 {
+      level -= inc;
+      envelope.push(level);
+    }
 
 		Self {
 			params: Arc::new(WhammyParams::default()),
 			buffer,
-			read_pos,
 			write_pos: 0,
-			signal_delta,
+			envelope,
+      envelope_pos: 0
 		}
 	}
 }
@@ -49,15 +61,15 @@ impl Default for WhammyParams {
 			// This gain is stored as linear gain. NIH-plug comes with useful conversion functions
 			// to treat these kinds of parameters as if we were dealing with decibels. Storing this
 			// as decibels is easier to work with, but requires a conversion for every sample.
-			gain: FloatParam::new(
-				"Gain",
-				util::db_to_gain(0.0),
+			dive: FloatParam::new(
+				"Div",
+				0.,
 				FloatRange::Skewed {
-					min: util::db_to_gain(-30.0),
-					max: util::db_to_gain(30.0),
+					min: -1.,
+					max: 0.,
 					// This makes the range appear as if it was linear when displaying the values as
 					// decibels
-					factor: FloatRange::gain_skew_factor(-30.0, 30.0),
+					factor: 1.
 				},
 			)
 			// Because the gain parameter is stored as linear gain instead of storing the value as
@@ -96,7 +108,7 @@ impl Plugin for Whammy {
 		names: PortNames::const_default(),
 	}];
 
-	const MIDI_INPUT: MidiConfig = MidiConfig::None;
+	const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
 	const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
 	const SAMPLE_ACCURATE_AUTOMATION: bool = true;
@@ -118,7 +130,7 @@ impl Plugin for Whammy {
 		&mut self,
 		_audio_io_layout: &AudioIOLayout,
 		_buffer_config: &BufferConfig,
-		_context: &mut impl InitContext<Self>,
+		context: &mut impl InitContext<Self>,
 	) -> bool {
 		// Resize buffers and perform other potentially expensive initialization operations here.
 		// The `reset()` function is always called right after this function. You can remove this
@@ -144,14 +156,35 @@ impl Plugin for Whammy {
 
 			for sample in channel_samples {
         self.buffer[self.write_pos] = sample.clone();
-        *sample = self.buffer[self.read_pos];
+        
+        let delayed_read = self.write_pos as f32 - self.params.dive.smoothed.next() * 1000.;
+        let wrapped = if delayed_read < 0. {
+          self.buffer.len() as f32 + delayed_read // TODO: store buffer len as float in struct
+        } else {
+          delayed_read % self.buffer.len() as f32
+        };
+
+        let interpolated = self.interpolate(&wrapped, &self.buffer);
+        *sample = interpolated;
+        
         self.write_pos = (self.write_pos + 1) % self.buffer.len();
-        self.read_pos = (self.read_pos + 1) % self.buffer.len();
+        self.envelope_pos = (self.envelope_pos + 1) % self.envelope.len();
 			}
 		}
 
 		ProcessStatus::Normal
 	}
+}
+
+impl Whammy {
+  fn interpolate(&self, f_idx: &f32, buffer: &Vec<f32>) -> f32 {
+    let low_idx = *f_idx as usize;
+    let high_idx = (low_idx + 1) % buffer.len();
+    let low_sample = buffer[low_idx];
+    let high_sample = buffer[high_idx];
+    
+    (low_sample + high_sample) * 0.5
+  }
 }
 
 impl ClapPlugin for Whammy {
