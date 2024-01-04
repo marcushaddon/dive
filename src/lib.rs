@@ -5,7 +5,7 @@ use std::sync::Arc;
 // https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
 // started
 
-struct Whammy {
+struct Dive {
 	params: Arc<WhammyParams>,
 	buffer: Vec<f32>,
 	write_pos: usize,
@@ -23,7 +23,7 @@ struct WhammyParams {
 	pub dive: FloatParam,
 }
 
-impl Default for Whammy {
+impl Default for Dive {
 	fn default() -> Self {
 		let mut buffer: Vec<f32> = Vec::new();
     // Zero out ring buffer
@@ -75,7 +75,7 @@ impl Default for WhammyParams {
 	}
 }
 
-impl Plugin for Whammy {
+impl Plugin for Dive {
 	const NAME: &'static str = "Whammy";
 	const VENDOR: &'static str = "Marcus Haddon";
 	const URL: &'static str = env!("CARGO_PKG_HOMEPAGE");
@@ -146,7 +146,7 @@ impl Plugin for Whammy {
 	}
 }
 
-impl Whammy {
+impl Dive {
   fn interpolate(&self, f_idx: &f32, buffer: &Vec<f32>) -> f32 {
     let low_idx = *f_idx as usize;
     let high_idx = (low_idx + 1) % buffer.len();
@@ -157,7 +157,7 @@ impl Whammy {
   }
 }
 
-impl ClapPlugin for Whammy {
+impl ClapPlugin for Dive {
 	const CLAP_ID: &'static str = "com.your-domain.whammy";
 	const CLAP_DESCRIPTION: Option<&'static str> = Some("Creates 'whammy bar' or 'tremolo arm' style bends, dips, or divebombs, as well as MBV style 'glid guitar' pitch bending, but on any incoming audio stream.");
 	const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
@@ -167,7 +167,7 @@ impl ClapPlugin for Whammy {
 	const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::AudioEffect, ClapFeature::Stereo];
 }
 
-impl Vst3Plugin for Whammy {
+impl Vst3Plugin for Dive {
 	const VST3_CLASS_ID: [u8; 16] = *b"WhammyAudioBuffr";
 
 	// And also don't forget to change these categories
@@ -175,5 +175,5 @@ impl Vst3Plugin for Whammy {
 		&[Vst3SubCategory::Fx, Vst3SubCategory::Dynamics];
 }
 
-nih_export_clap!(Whammy);
-nih_export_vst3!(Whammy);
+nih_export_clap!(Dive);
+nih_export_vst3!(Dive);
