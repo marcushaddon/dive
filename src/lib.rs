@@ -9,8 +9,6 @@ struct Dive {
 	params: Arc<WhammyParams>,
 	buffer: Vec<f32>,
 	write_pos: usize,
-  envelope: Vec<f32>,
-  envelope_pos: usize,
 }
 
 #[derive(Params)]
@@ -26,31 +24,29 @@ struct WhammyParams {
 impl Default for Dive {
 	fn default() -> Self {
 		let mut buffer: Vec<f32> = Vec::new();
-    // Zero out ring buffer
-		for _ in 0..(44100 * 3) {
-			buffer.push(0.);
+		// Zero out ring buffer
+			for _ in 0..(44100 * 3) {
+				buffer.push(0.);
+			}
+
+		let mut envelope: Vec<f32> = Vec::new();
+		let inc: f32 = 1. / 22050.;
+
+		// Manually create envelop
+		let mut level: f32 = 0.;
+		for i in 0..22050 {
+		envelope.push(level);
+		level += inc;
 		}
-
-    let mut envelope: Vec<f32> = Vec::new();
-    let inc: f32 = 1. / 22050.;
-
-    // Manually create envelop
-    let mut level: f32 = 0.;
-    for i in 0..22050 {
-      envelope.push(level);
-      level += inc;
-    }
-    for i in 0..22050 {
-      level -= inc;
-      envelope.push(level);
-    }
+		for i in 0..22050 {
+		level -= inc;
+		envelope.push(level);
+		}
 
 		Self {
 			params: Arc::new(WhammyParams::default()),
 			buffer,
 			write_pos: 0,
-			envelope,
-      envelope_pos: 0
 		}
 	}
 }
@@ -62,8 +58,8 @@ impl Default for WhammyParams {
 				"Div",
 				0.,
 				FloatRange::Skewed {
-					min: -1.,
-					max: 0.,
+					min: 0.,
+					max: 1.,
 					factor: 1.
 				},
 			)
@@ -124,22 +120,21 @@ impl Plugin for Dive {
 		_context: &mut impl ProcessContext<Self>,
 	) -> ProcessStatus {
 		for channel_samples in buffer.iter_samples() {
-      let delayed_read = self.write_pos as f32 - self.params.dive.smoothed.next() * 1000.;
-      let wrapped = if delayed_read < 0. {
-        self.buffer.len() as f32 + delayed_read // TODO: store buffer len as float in struct
-      } else {
-        delayed_read % self.buffer.len() as f32
-      };
+			let delayed_read = self.write_pos as f32 - self.params.dive.smoothed.next() * -1000.;
+			let wrapped = if delayed_read < 0. {
+				self.buffer.len() as f32 + delayed_read // TODO: store buffer len as float in struct
+			} else {
+				delayed_read % self.buffer.len() as f32
+			};
 
-      let interpolated = self.interpolate(&wrapped, &self.buffer);
+			let interpolated = self.interpolate(&wrapped, &self.buffer);
 			for sample in channel_samples {
-        self.buffer[self.write_pos] = sample.clone();
-        // TODO: Actually store each channel sample (currently overwriting)
-        *sample = interpolated;
+				self.buffer[self.write_pos] = sample.clone();
+				// TODO: Actually store each channel sample (currently overwriting)
+				*sample = interpolated;
 			}
 
-      self.write_pos = (self.write_pos + 1) % self.buffer.len();
-      self.envelope_pos = (self.envelope_pos + 1) % self.envelope.len();
+			self.write_pos = (self.write_pos + 1) % self.buffer.len();
 		}
 
 		ProcessStatus::Normal
@@ -147,14 +142,14 @@ impl Plugin for Dive {
 }
 
 impl Dive {
-  fn interpolate(&self, f_idx: &f32, buffer: &Vec<f32>) -> f32 {
-    let low_idx = *f_idx as usize;
-    let high_idx = (low_idx + 1) % buffer.len();
-    let low_sample = buffer[low_idx];
-    let high_sample = buffer[high_idx];
+  	fn interpolate(&self, f_idx: &f32, buffer: &Vec<f32>) -> f32 {
+        let low_idx = *f_idx as usize;
+		let high_idx = (low_idx + 1) % buffer.len();
+		let low_sample = buffer[low_idx];
+		let high_sample = buffer[high_idx];
     
-    (low_sample + high_sample) * 0.5
-  }
+    	(low_sample + high_sample) * 0.5
+  	}
 }
 
 impl ClapPlugin for Dive {
