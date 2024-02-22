@@ -20,6 +20,9 @@ struct WhammyParams {
 	/// gain parameter is stored as linear gain while the values are displayed in decibels.
 	#[id = "dive"]
 	pub dive: FloatParam,
+
+  #[id = "depth"]
+  pub depth: FloatParam
 }
 
 impl Default for Dive {
@@ -57,17 +60,23 @@ impl Default for WhammyParams {
 	fn default() -> Self {
 		Self {
 			dive: FloatParam::new(
-				"Div",
+				"Dive",
 				0.,
 				FloatRange::Linear {
 					min: 0.,
 					max: 0.5,
 				},
 			)
-			.with_smoother(SmoothingStyle::Linear(250.))
-			.with_unit(" dB")
-			.with_value_to_string(formatters::v2s_f32_gain_to_db(2))
-			.with_string_to_value(formatters::s2v_f32_gain_to_db()),
+			.with_smoother(SmoothingStyle::Linear(250.)),
+
+      depth: FloatParam::new(
+        "Depth",
+        1.,
+        FloatRange::Linear {
+          min: 0.,
+          max: 3.
+        }
+      ).with_smoother(SmoothingStyle::Linear(250.))
 		}
 	}
 }
@@ -129,16 +138,6 @@ impl Plugin for Dive {
 }
 
 impl Dive {
-  	fn interpolate(&self, f_idx: &f32, buffer: &Vec<f32>) -> f32 {
-      let low_idx = *f_idx as usize;
-      let high_idx = (low_idx + 1) % buffer.len();
-      let split = f_idx % 1.;
-      let low_sample = buffer[low_idx];
-      let high_sample = buffer[high_idx];
-    
-    	low_sample * split + high_sample * (1. - split)
-  	}
-
     fn read(&mut self, buffer: &mut Buffer) {
       for channel_samples in buffer.iter_samples() {
         // TODO: support > 1 channel
@@ -153,7 +152,8 @@ impl Dive {
 
     fn write(&mut self, buffer: &mut Buffer) {
       for channel_samples in buffer.iter_samples() {
-        let delayed_read = self.read_pos as f32 - 1. - self.params.dive.smoothed.next() * 1000.;
+        let delayed_read = self.read_pos as f32 - 1. -
+          self.params.dive.smoothed.next() * self.params.depth.smoothed.next() * 1000.;
         let wrapped = if delayed_read < 0. {
           self.buffer.len() as f32 + delayed_read // TODO: store buffer len as float in struct
         } else {
@@ -161,11 +161,31 @@ impl Dive {
         };
 
         for sample in channel_samples {
-          *sample = self.interpolate(&wrapped, &self.buffer)
+          *sample = interpolate_2(&wrapped, &self.buffer)
         }
         self.read_pos = (self.read_pos + 1) % self.buffer.len();
       }
     }
+}
+
+fn interpolate_2(f_idx: &f32, buffer: &Vec<f32>) -> f32 {
+  // y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+  // low_sample + (f_idx - low_idx) * (high_sample - low_sample) / (high_idx - low_idx) = 1\
+  // low_sample + (f_idx - low_idx) * (high_sample - low_sample)
+  let clamped = f_idx.clamp(0., buffer.len() as f32);
+
+
+  let low_idx = clamped as usize;
+  let high_idx = low_idx + 1;
+  let high_idx_wrapped = if high_idx >= buffer.len() {
+    high_idx - buffer.len()
+  } else {
+    high_idx
+  };
+  let low_sample = buffer[low_idx];
+  let high_sample = buffer[high_idx_wrapped];
+
+  low_sample + (f_idx - (low_idx as f32)) * (high_sample - low_sample)
 }
 
 impl ClapPlugin for Dive {
